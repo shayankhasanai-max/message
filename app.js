@@ -1,4 +1,4 @@
-﻿const storage = {
+const storage = {
   get(key, fallback) {
     try {
       const value = localStorage.getItem(key);
@@ -17,11 +17,13 @@
 
 const bus = "BroadcastChannel" in window ? new BroadcastChannel("missile_sync") : null;
 const NOTIF_PROMPTED_KEY = "missile_notif_prompted";
+const GOOGLE_CLIENT_ID_KEY = "missile_google_client_id";
 
 const state = {
   mode: "login",
   activeContactEmail: null,
   pendingMedia: null,
+  mobileChatOpen: false,
   notifiedMessages: {},
   processedSignals: new Set(),
   pendingRemoteCandidates: [],
@@ -36,7 +38,8 @@ const state = {
     timerId: null,
     peer: null,
     localStream: null,
-    pendingOffer: null
+    pendingOffer: null,
+    mediaMode: "audio"
   }
 };
 
@@ -55,7 +58,9 @@ const el = {
   logoutBtn: document.getElementById("logoutBtn"),
   changePinBtn: document.getElementById("changePinBtn"),
   audioCallBtn: document.getElementById("audioCallBtn"),
+  videoCallBtn: document.getElementById("videoCallBtn"),
   callOverlay: document.getElementById("callOverlay"),
+  callTypeLabel: document.getElementById("callTypeLabel"),
   callContactName: document.getElementById("callContactName"),
   callStatus: document.getElementById("callStatus"),
   callTimer: document.getElementById("callTimer"),
@@ -63,7 +68,11 @@ const el = {
   endCallBtn: document.getElementById("endCallBtn"),
   acceptCallBtn: document.getElementById("acceptCallBtn"),
   declineCallBtn: document.getElementById("declineCallBtn"),
-  remoteAudio: document.getElementById("remoteAudio")
+  callVideoWrap: document.getElementById("callVideoWrap"),
+  localVideo: document.getElementById("localVideo"),
+  remoteVideo: document.getElementById("remoteVideo"),
+  remoteAudio: document.getElementById("remoteAudio"),
+  mobileBackBtn: document.getElementById("mobileBackBtn")
 };
 
 const SESSION_KEY = "missile_session_user";
@@ -244,12 +253,55 @@ function getActiveContact() {
   return getContacts(session.email).find((c) => c.email === state.activeContactEmail) || null;
 }
 
+function isMobileView() {
+  return window.matchMedia("(max-width: 860px)").matches;
+}
+
+function updateMobileLayout() {
+  const listOpen = isMobileView() && !state.mobileChatOpen;
+  const chatOpen = isMobileView() && state.mobileChatOpen;
+  el.chatScreen.classList.toggle("mobile-list-open", listOpen);
+  el.chatScreen.classList.toggle("mobile-chat-open", chatOpen);
+  el.mobileBackBtn.classList.toggle("hidden", !chatOpen);
+}
+
+function openChat(contactEmail) {
+  state.activeContactEmail = contactEmail;
+  if (isMobileView()) {
+    state.mobileChatOpen = true;
+  }
+  renderContacts();
+  renderMessages();
+  updateMobileLayout();
+  renderCallOverlay();
+}
+
+function goBackToContacts() {
+  state.mobileChatOpen = false;
+  updateMobileLayout();
+}
 function notifySync(type, payload = {}) {
   const detail = { type, payload, at: Date.now(), id: `${Date.now()}_${Math.random()}` };
   if (bus) bus.postMessage(detail);
   localStorage.setItem("missile_sync_event", JSON.stringify(detail));
 }
 
+function decodeJwtPayload(token) {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => `%${(`00${c.charCodeAt(0).toString(16)}`).slice(-2)}`)
+        .join("")
+    );
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
 function renderAuth() {
   el.authScreen.classList.remove("hidden");
   el.lockScreen.classList.add("hidden");
@@ -258,7 +310,7 @@ function renderAuth() {
   const isSignup = state.mode === "signup";
   el.authScreen.innerHTML = `
     <div class="card auth-card">
-      <h2>${isSignup ? "Create account" : "Welcome back"}</h2>
+      <h2>${isSignup ? "Create account" : "Good to see you again!"}</h2>
       <p class="meta">${isSignup ? "Sign up to start messaging" : "Log in to continue"}</p>
       <form id="authForm" class="stack">
         ${
@@ -270,7 +322,20 @@ function renderAuth() {
         <input id="authEmail" type="email" placeholder="Email" required />
         <input id="authPassword" type="password" placeholder="Password" required />
         <button class="btn" type="submit">${isSignup ? "Sign up" : "Login"}</button>
+        <button id="googleAuthBtn" class="google-btn-fallback" type="button"><span>G</span> Continue with Google</button>
       </form>
+      <section id="googlePanel" class="google-panel hidden">
+        <p class="meta">Quick Google setup</p>
+        <p class="google-note">No password needed for Google sign up.</p>
+        <input id="googleEmailInput" type="email" placeholder="Google email" />
+        <input id="googleNameInput" type="text" placeholder="Full name" />
+        <input id="googlePinInput" type="password" maxlength="4" placeholder="4-digit PIN (For your privacy in our app)" />
+        <div class="google-panel-actions">
+          <button id="googleSubmitBtn" class="btn" type="button">Continue</button>
+          <button id="googleCancelBtn" class="btn btn-ghost" type="button">Cancel</button>
+        </div>
+        <p id="googleError" class="error"></p>
+      </section>
       <p id="authError" class="error"></p>
       <p class="meta">
         ${isSignup ? "Already have an account?" : "New to Missile?"}
@@ -286,6 +351,80 @@ function renderAuth() {
     renderAuth();
   };
 
+  const googleBtn = document.getElementById("googleAuthBtn");
+  const googlePanel = document.getElementById("googlePanel");
+  const googleEmailInput = document.getElementById("googleEmailInput");
+  const googleNameInput = document.getElementById("googleNameInput");
+  const googlePinInput = document.getElementById("googlePinInput");
+  const googleSubmitBtn = document.getElementById("googleSubmitBtn");
+  const googleCancelBtn = document.getElementById("googleCancelBtn");
+  const googleError = document.getElementById("googleError");
+
+  function openGooglePanel() {
+    googleError.textContent = "";
+    googlePanel.classList.remove("hidden");
+    const existingEmail = document.getElementById("authEmail")?.value?.trim();
+    if (existingEmail && !googleEmailInput.value) {
+      googleEmailInput.value = existingEmail;
+    }
+    googleEmailInput.focus();
+  }
+
+  function closeGooglePanel() {
+    googlePanel.classList.add("hidden");
+    googleError.textContent = "";
+  }
+
+  googleBtn.onclick = openGooglePanel;
+  googleCancelBtn.onclick = closeGooglePanel;
+
+  googleSubmitBtn.onclick = () => {
+    googleError.textContent = "";
+
+    const email = googleEmailInput.value.trim().toLowerCase();
+    const name = googleNameInput.value.trim();
+    const pin = googlePinInput.value.trim();
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      googleError.textContent = "Enter a valid Google email.";
+      googleEmailInput.focus();
+      return;
+    }
+
+    const users = allUsers();
+    let user = users.find((u) => u.email === email);
+
+    if (!user) {
+      if (!name) {
+        googleError.textContent = "Name is required for new Google account.";
+        googleNameInput.focus();
+        return;
+      }
+      if (!/^\d{4}$/.test(pin)) {
+        googleError.textContent = "PIN must be exactly 4 digits.";
+        googlePinInput.focus();
+        return;
+      }
+
+      user = {
+        name,
+        email,
+        password: "google-auth",
+        pin,
+        provider: "google"
+      };
+
+      users.push(user);
+      storage.set("users", users);
+      if (!storage.get(contactKey(email), null)) {
+        setContacts(email, []);
+      }
+      notifySync("auth");
+    }
+
+    setSessionUser(email);
+    renderLock();
+  };
   document.getElementById("authForm").onsubmit = (event) => {
     event.preventDefault();
     const authError = document.getElementById("authError");
@@ -385,22 +524,24 @@ function renderContacts() {
   }
 
   el.contactsList.innerHTML = contacts
-    .map(
-      (contact) => `
+    .map((contact) => {
+      const last = getMessages(session.email, contact.email).slice(-1)[0];
+      const preview = last ? (last.text || "[Media]") : "Tap to start chatting";
+      return `
       <article class="contact-item ${state.activeContactEmail === contact.email ? "active" : ""}" data-email="${contact.email}">
-        <h3>${escapeHtml(contact.name)}</h3>
-        <p>${escapeHtml(contact.email)}</p>
+        <div class="contact-top">
+          <h3>${escapeHtml(contact.name)}</h3>
+          <span class="meta">${last ? new Date(last.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>
+        </div>
+        <div class="meta contact-sub">${escapeHtml(preview)}</div>
       </article>
-    `
-    )
+    `;
+    })
     .join("");
 
   el.contactsList.querySelectorAll(".contact-item").forEach((item) => {
     item.addEventListener("click", () => {
-      state.activeContactEmail = item.dataset.email;
-      renderContacts();
-      renderMessages();
-      renderCallOverlay();
+      openChat(item.dataset.email);
     });
   });
 }
@@ -412,6 +553,7 @@ function renderMessages() {
   const activeContact = getActiveContact();
 
   if (!activeContact) {
+    state.mobileChatOpen = false;
     el.activeChatTitle.textContent = "Select a contact";
     el.activeChatSubtitle.textContent = "No chat selected";
     el.messages.innerHTML = '<p class="empty">Choose a contact to start chatting.</p>';
@@ -461,13 +603,16 @@ function renderChatApp() {
   el.chatScreen.classList.remove("hidden");
 
   const contacts = getContacts(session.email);
-  if (!state.activeContactEmail && contacts.length) {
+  if (!state.activeContactEmail && contacts.length && !isMobileView()) {
     state.activeContactEmail = contacts[0].email;
   }
+
+  state.mobileChatOpen = isMobileView() ? false : !!state.activeContactEmail;
 
   syncKnownConversationsAsContacts();
   renderContacts();
   renderMessages();
+  updateMobileLayout();
   renderCallOverlay();
   processSignals();
 }
@@ -604,6 +749,7 @@ function logout() {
   state.activeContactEmail = null;
   state.pendingMedia = null;
   renderAuth();
+  updateMobileLayout();
   renderCallOverlay();
 }
 
@@ -642,6 +788,8 @@ function closePeer() {
 
   state.call.localStream = null;
   el.remoteAudio.srcObject = null;
+  el.remoteVideo.srcObject = null;
+  el.localVideo.srcObject = null;
   state.pendingRemoteCandidates = [];
 }
 
@@ -657,13 +805,16 @@ function resetCallState() {
   state.call.startedAt = null;
   state.call.seconds = 0;
   state.call.pendingOffer = null;
+  state.call.mediaMode = "audio";
 }
 
 function renderCallOverlay() {
   const session = currentUser();
   const activeContact = getActiveContact();
 
-  el.audioCallBtn.disabled = !session || !activeContact || state.call.active;
+  const canStartCall = !!session && !!activeContact && !state.call.active;
+  el.audioCallBtn.disabled = !canStartCall;
+  if (el.videoCallBtn) el.videoCallBtn.disabled = !canStartCall;
 
   if (!state.call.active) {
     el.callOverlay.classList.add("hidden");
@@ -674,6 +825,9 @@ function renderCallOverlay() {
   const displayName = targetEmail && session ? getDisplayNameForEmail(session.email, targetEmail) : "Unknown";
 
   el.callOverlay.classList.remove("hidden");
+  if (el.callTypeLabel) {
+    el.callTypeLabel.textContent = state.call.mediaMode === "video" ? "Missile Video Call" : "Missile Audio Call";
+  }
   el.callContactName.textContent = displayName;
   el.callStatus.textContent = state.call.statusText;
   el.callTimer.textContent = formatDuration(state.call.seconds);
@@ -687,6 +841,9 @@ function renderCallOverlay() {
   el.muteCallBtn.classList.toggle("hidden", incoming);
   el.endCallBtn.classList.toggle("hidden", incoming);
   el.muteCallBtn.disabled = !connected;
+
+  const showVideo = state.call.mediaMode === "video";
+  if (el.callVideoWrap) el.callVideoWrap.classList.toggle("hidden", !showVideo);
 }
 
 function publishSignal(targetEmail, type, payload = {}) {
@@ -723,6 +880,9 @@ function ensurePeer(targetEmail) {
     const [stream] = event.streams;
     if (stream) {
       el.remoteAudio.srcObject = stream;
+      if (state.call.mediaMode === "video" && el.remoteVideo) {
+        el.remoteVideo.srcObject = stream;
+      }
     }
   };
 
@@ -737,10 +897,24 @@ function ensurePeer(targetEmail) {
   return peer;
 }
 
-async function ensureLocalAudio() {
-  if (state.call.localStream) return state.call.localStream;
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+async function ensureLocalMedia(mode) {
+  if (state.call.localStream) {
+    const hasVideo = state.call.localStream.getVideoTracks().length > 0;
+    if ((mode === "video" && hasVideo) || (mode === "audio" && !hasVideo)) {
+      return state.call.localStream;
+    }
+    state.call.localStream.getTracks().forEach((t) => t.stop());
+    state.call.localStream = null;
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia(
+    mode === "video" ? { audio: true, video: { facingMode: "user" } } : { audio: true, video: false }
+  );
+
   state.call.localStream = stream;
+  if (el.localVideo) {
+    el.localVideo.srcObject = mode === "video" ? stream : null;
+  }
   return stream;
 }
 
@@ -754,7 +928,7 @@ function startCallTimer() {
   }, 1000);
 }
 
-async function startAudioCall() {
+async function startCall(mode) {
   const session = currentUser();
   const activeContact = getActiveContact();
   if (!session || !activeContact || state.call.active) return;
@@ -763,21 +937,30 @@ async function startAudioCall() {
     state.call.active = true;
     state.call.phase = "outgoing";
     state.call.targetEmail = activeContact.email;
-    state.call.statusText = "Calling...";
+    state.call.mediaMode = mode;
+    state.call.statusText = mode === "video" ? "Starting video call..." : "Calling...";
     renderCallOverlay();
 
-    const stream = await ensureLocalAudio();
+    const stream = await ensureLocalMedia(mode);
     const peer = ensurePeer(activeContact.email);
     stream.getTracks().forEach((track) => peer.addTrack(track, stream));
 
     const offer = await peer.createOffer();
     await peer.setLocalDescription(offer);
-    publishSignal(activeContact.email, "offer", offer);
+    publishSignal(activeContact.email, "offer", { sdp: offer, mode });
   } catch {
-    alert("Unable to start call. Microphone permission is required.");
+    alert(mode === "video" ? "Unable to start video call." : "Unable to start call.");
     resetCallState();
     renderCallOverlay();
   }
+}
+
+async function startAudioCall() {
+  await startCall("audio");
+}
+
+async function startVideoCall() {
+  await startCall("video");
 }
 
 async function acceptIncomingCall() {
@@ -785,7 +968,7 @@ async function acceptIncomingCall() {
 
   try {
     const targetEmail = state.call.targetEmail;
-    const stream = await ensureLocalAudio();
+    const stream = await ensureLocalMedia(state.call.mediaMode || "audio");
     const peer = ensurePeer(targetEmail);
     stream.getTracks().forEach((track) => peer.addTrack(track, stream));
 
@@ -798,7 +981,7 @@ async function acceptIncomingCall() {
 
     const answer = await peer.createAnswer();
     await peer.setLocalDescription(answer);
-    publishSignal(targetEmail, "answer", answer);
+    publishSignal(targetEmail, "answer", { sdp: answer });
 
     state.call.phase = "connected";
     state.call.statusText = "Connected";
@@ -851,13 +1034,15 @@ async function handleSignal(signal) {
       return;
     }
 
+    const offerPayload = signal.payload || {};
     state.call.active = true;
     state.call.phase = "incoming";
     state.call.targetEmail = signal.from;
-    state.call.pendingOffer = signal.payload;
-    state.call.statusText = `Incoming call from ${getDisplayNameForEmail(session.email, signal.from)}`;
+    state.call.mediaMode = offerPayload.mode === "video" ? "video" : "audio";
+    state.call.pendingOffer = offerPayload.sdp || offerPayload;
+    state.call.statusText = `Incoming ${state.call.mediaMode} call from ${getDisplayNameForEmail(session.email, signal.from)}`;
     if (document.visibilityState !== "visible") {
-      showNotification("Incoming Missile call", `Call from ${getDisplayNameForEmail(session.email, signal.from)}`);
+      showNotification(`Incoming ${state.call.mediaMode} call`, `From ${getDisplayNameForEmail(session.email, signal.from)}`);
     }
 
     if (getContacts(session.email).some((c) => c.email === signal.from)) {
@@ -875,7 +1060,7 @@ async function handleSignal(signal) {
   const peer = state.call.peer;
 
   if (signal.type === "answer" && peer) {
-    await peer.setRemoteDescription(new RTCSessionDescription(signal.payload));
+    await peer.setRemoteDescription(new RTCSessionDescription(signal.payload?.sdp || signal.payload));
     for (const c of state.pendingRemoteCandidates) {
       await peer.addIceCandidate(new RTCIceCandidate(c));
     }
@@ -933,6 +1118,7 @@ function onExternalSync() {
   syncKnownConversationsAsContacts();
   renderContacts();
   renderMessages();
+  updateMobileLayout();
   renderCallOverlay();
   processSignals();
 }
@@ -943,10 +1129,12 @@ function boot() {
   el.logoutBtn.addEventListener("click", logout);
   el.changePinBtn.addEventListener("click", changePin);
   el.audioCallBtn.addEventListener("click", startAudioCall);
+  if (el.videoCallBtn) el.videoCallBtn.addEventListener("click", startVideoCall);
   el.muteCallBtn.addEventListener("click", toggleMuteCall);
   el.endCallBtn.addEventListener("click", () => endCall(true));
   el.acceptCallBtn.addEventListener("click", acceptIncomingCall);
   el.declineCallBtn.addEventListener("click", declineIncomingCall);
+  el.mobileBackBtn.addEventListener("click", goBackToContacts);
 
   el.mediaInput.addEventListener("change", (event) => {
     const file = event.target.files?.[0] || null;
@@ -957,6 +1145,8 @@ function boot() {
   if (bus) {
     bus.onmessage = () => onExternalSync();
   }
+
+  window.addEventListener("resize", updateMobileLayout);
 
   window.addEventListener("storage", (event) => {
     if (!event.key) return;
@@ -974,9 +1164,28 @@ function boot() {
   }
 
   syncKnownConversationsAsContacts();
+  updateMobileLayout();
   renderCallOverlay();
 }
 
 boot();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
