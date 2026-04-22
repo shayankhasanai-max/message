@@ -1,0 +1,80 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Missile</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app" class="app">
+    <section id="authScreen" class="screen"></section>
+    <section id="lockScreen" class="screen hidden"></section>
+
+    <section id="chatScreen" class="chat-screen hidden">
+      <aside class="sidebar">
+        <div class="sidebar-top">
+          <h1 class="brand">
+            <span class="brand-logo" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <path fill="#1b9b63" d="M20.7 3.3c-3.4-.8-8 1-10.7 3.7L3 14l7 7 7-7c2.7-2.7 4.5-7.3 3.7-10.7zM8.2 15.8l-1.4-1.4 2.3-2.3 1.4 1.4-2.3 2.3z"></path>
+                <path fill="#45c785" d="M4.2 19.8l.8-4.4 3.6 3.6-4.4.8z"></path>
+              </svg>
+            </span>
+            Missile
+          </h1>
+          <button id="logoutBtn" class="btn btn-ghost" type="button">Logout</button>
+        </div>
+
+        <form id="contactForm" class="card form-inline">
+          <input id="contactName" type="text" placeholder="Contact name" required />
+          <input id="contactEmail" type="email" placeholder="Contact email" required />
+          <button class="btn" type="submit">Add</button>
+        </form>
+
+        <div id="contactsList" class="contacts-list"></div>
+      </aside>
+
+      <main class="chat-panel">
+        <div class="chat-header">
+          <div>
+            <h2 id="activeChatTitle">Select a contact</h2>
+            <p id="activeChatSubtitle">No chat selected</p>
+          </div>
+          <div class="header-actions">
+            <button id="audioCallBtn" class="btn btn-ghost" type="button">Audio Call</button>
+            <button id="changePinBtn" class="btn btn-ghost" type="button">Change PIN</button>
+          </div>
+        </div>
+
+        <div id="messages" class="messages"></div>
+
+        <form id="messageForm" class="message-form">
+          <label for="mediaInput" class="file-btn" title="Attach media">+</label>
+          <input id="mediaInput" type="file" accept="image/*,video/*,.pdf,.doc,.docx,.txt" hidden />
+          <input id="messageInput" type="text" placeholder="Type a message" />
+          <button class="btn" type="submit">Send</button>
+        </form>
+      </main>
+    </section>
+  </div>
+
+  <section id="callOverlay" class="call-overlay hidden" aria-live="polite">
+    <div class="call-card">
+      <p class="call-label">Missile Audio Call</p>
+      <h3 id="callContactName">No contact selected</h3>
+      <p id="callStatus" class="meta">Idle</p>
+      <p id="callTimer" class="call-timer">00:00</p>
+      <div class="call-actions">
+        <button id="acceptCallBtn" class="btn hidden" type="button">Accept</button>
+        <button id="declineCallBtn" class="btn btn-ghost hidden" type="button">Decline</button>
+        <button id="muteCallBtn" class="btn btn-ghost" type="button">Mute</button>
+        <button id="endCallBtn" class="btn call-end" type="button">End</button>
+      </div>
+    </div>
+  </section>
+  <audio id="remoteAudio" autoplay></audio>
+
+  <script src="app.js"></script>
+</body>
+</html>
