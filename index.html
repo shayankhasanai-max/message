@@ -1,10 +1,11 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Missile</title>
+  <title>Missile The email messaging app</title>
   <link rel="stylesheet" href="styles.css" />
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <div id="app" class="app">
@@ -37,12 +38,16 @@
 
       <main class="chat-panel">
         <div class="chat-header">
-          <div>
-            <h2 id="activeChatTitle">Select a contact</h2>
-            <p id="activeChatSubtitle">No chat selected</p>
+          <div class="chat-header-main">
+            <button id="mobileBackBtn" class="mobile-back-btn hidden" type="button" aria-label="Back to chats">←</button>
+            <div>
+              <h2 id="activeChatTitle">Select a contact</h2>
+              <p id="activeChatSubtitle">No chat selected</p>
+            </div>
           </div>
           <div class="header-actions">
             <button id="audioCallBtn" class="btn btn-ghost" type="button">Audio Call</button>
+            <button id="videoCallBtn" class="btn btn-ghost" type="button">Video Call</button>
             <button id="changePinBtn" class="btn btn-ghost" type="button">Change PIN</button>
           </div>
         </div>
@@ -61,10 +66,16 @@
 
   <section id="callOverlay" class="call-overlay hidden" aria-live="polite">
     <div class="call-card">
-      <p class="call-label">Missile Audio Call</p>
+      <p id="callTypeLabel" class="call-label">Missile Audio Call</p>
       <h3 id="callContactName">No contact selected</h3>
       <p id="callStatus" class="meta">Idle</p>
       <p id="callTimer" class="call-timer">00:00</p>
+
+      <div id="callVideoWrap" class="call-video hidden">
+        <video id="remoteVideo" autoplay playsinline></video>
+        <video id="localVideo" autoplay playsinline muted></video>
+      </div>
+
       <div class="call-actions">
         <button id="acceptCallBtn" class="btn hidden" type="button">Accept</button>
         <button id="declineCallBtn" class="btn btn-ghost hidden" type="button">Decline</button>
@@ -73,6 +84,7 @@
       </div>
     </div>
   </section>
+
   <audio id="remoteAudio" autoplay></audio>
 
   <script src="app.js"></script>
