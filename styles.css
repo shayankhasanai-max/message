@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   --bg: #f4f6f8;
   --panel: #ffffff;
   --text: #1e2430;
@@ -76,6 +76,26 @@ p {
   display: grid;
   gap: 12px;
   margin-top: 14px;
+}
+
+.google-row {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+
+.google-divider {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.google-btn-fallback {
+  border: 1px solid #dadce0;
+  background: #fff;
+  color: #3c4043;
+  border-radius: 20px;
+  padding: 9px 14px;
 }
 
 input,
@@ -199,6 +219,20 @@ input:focus {
   color: var(--muted);
 }
 
+.contact-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.contact-sub {
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chat-panel {
   display: grid;
   grid-template-rows: auto 1fr auto;
@@ -219,6 +253,23 @@ input:focus {
   color: var(--muted);
   margin-top: 4px;
   font-size: 13px;
+}
+
+.chat-header-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-back-btn {
+  border: 0;
+  background: transparent;
+  color: #1f2d3d;
+  font-size: 20px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  cursor: pointer;
 }
 
 .header-actions {
@@ -325,11 +376,11 @@ input:focus {
 }
 
 .call-card {
-  width: min(360px, 100%);
+  width: min(420px, 100%);
   background: #ffffff;
   border: 1px solid var(--line);
   border-radius: 16px;
-  padding: 18px;
+  padding: 16px;
   text-align: center;
 }
 
@@ -346,11 +397,39 @@ input:focus {
   letter-spacing: 1px;
 }
 
+.call-video {
+  margin-top: 10px;
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0f1c25;
+}
+
+.call-video #remoteVideo {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  background: #0f1c25;
+}
+
+.call-video #localVideo {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 34%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: #142431;
+}
+
 .call-actions {
   margin-top: 14px;
   display: flex;
   gap: 10px;
   justify-content: center;
+  flex-wrap: wrap;
 }
 
 .call-end {
@@ -364,99 +443,222 @@ input:focus {
 @media (max-width: 860px) {
   body {
     overflow: hidden;
+    background: #efeae2;
   }
 
   .chat-screen {
-    grid-template-columns: 1fr;
-    grid-template-rows: 38vh 62vh;
-    height: 100vh;
+    display: block;
+    height: 100dvh;
+  }
+
+  .sidebar,
+  .chat-panel {
+    height: 100dvh;
+  }
+
+  .chat-screen.mobile-list-open .chat-panel {
+    display: none;
+  }
+
+  .chat-screen.mobile-chat-open .sidebar {
+    display: none;
   }
 
   .sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-    max-height: 38vh;
-    overflow: hidden;
-    padding: 10px;
-    gap: 8px;
+    border: 0;
+    padding: 0;
+    gap: 0;
   }
 
   .sidebar-top {
-    padding-bottom: 2px;
+    background: #075e54;
+    color: #fff;
+    padding: 12px;
   }
 
-  .sidebar .btn,
-  .chat-header .btn,
-  .message-form .btn {
-    padding: 8px 10px;
-    font-size: 13px;
+  .sidebar-top .btn-ghost {
+    background: rgba(255, 255, 255, 0.16);
+    color: #fff;
+  }
+
+  .brand-logo {
+    background: rgba(255, 255, 255, 0.18);
   }
 
   .form-inline {
     grid-template-columns: 1fr 1fr auto;
     gap: 6px;
-  }
-
-  .form-inline input {
-    padding: 9px 10px;
-  }
-
-  .contacts-list {
-    gap: 6px;
-    padding-bottom: 0;
-  }
-
-  .contact-item {
-    padding: 8px 10px;
-  }
-
-  .contact-item p,
-  #activeChatSubtitle {
-    display: none;
-  }
-
-  .contact-item h3 {
-    font-size: 14px;
-  }
-
-  .chat-panel {
-    min-height: 0;
-    height: 62vh;
-    grid-template-rows: auto 1fr auto;
-  }
-
-  .chat-header {
+    background: #fff;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
     padding: 10px;
   }
 
-  .chat-header h2 {
-    font-size: 17px;
+  .contacts-list {
+    background: #fff;
+    padding: 0;
+    gap: 0;
+  }
+
+  .contact-item {
+    border: 0;
+    border-radius: 0;
+    border-bottom: 1px solid #edf1f4;
+    padding: 11px 12px;
+  }
+
+  .contact-item.active {
+    background: #f2fbf8;
+    border-color: #edf1f4;
+  }
+
+  .contact-item p {
+    display: none;
+  }
+
+  .chat-panel {
+    min-height: 100dvh;
+    height: 100dvh;
+    grid-template-rows: auto 1fr auto;
+    background: #efeae2;
+  }
+
+  .chat-header {
+    background: #075e54;
+    color: #fff;
+    padding: 10px;
+  }
+
+  .chat-header p {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .mobile-back-btn {
+    display: grid;
+    place-items: center;
+    color: #fff;
+  }
+
+  #changePinBtn {
+    display: none;
   }
 
   .header-actions {
-    justify-content: flex-end;
     gap: 6px;
+  }
+
+  #audioCallBtn,
+  #videoCallBtn {
+    background: rgba(255, 255, 255, 0.16);
+    color: #fff;
+    border: 0;
+    padding: 8px 10px;
+    font-size: 13px;
   }
 
   .messages {
     padding: 10px;
     gap: 8px;
+    background: #efeae2;
   }
 
   .message {
-    max-width: 92%;
-    padding: 9px 11px;
-    border-radius: 12px;
+    max-width: 90%;
+    border: 0;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.06);
   }
 
   .message-form {
-    grid-template-columns: auto 1fr auto;
-    padding: 8px;
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    background: #f6f8fa;
+    border-top: 1px solid #e2e8ee;
+    padding: 10px 8px;
     gap: 6px;
+  }
+
+  .message-form input {
+    border-radius: 20px;
+    min-height: 42px;
+    padding: 11px 13px;
+  }
+
+  .message-form .btn {
+    min-height: 42px;
+    padding: 10px 12px;
+    border-radius: 18px;
   }
 
   .file-btn {
     width: 30px;
     height: 30px;
   }
+
+  .call-card {
+    padding: 12px;
+  }
 }
+
+.google-btn-fallback {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.google-btn-fallback span {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  background: #fff;
+  color: #4285f4;
+  border: 1px solid #dadce0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+
+.google-panel {
+  margin-top: 10px;
+  border: 1px solid #e3e8ee;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fbfcfe;
+  display: grid;
+  gap: 8px;
+}
+
+.google-panel input {
+  padding: 10px 11px;
+}
+
+.google-panel-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.google-panel .btn {
+  flex: 1;
+}
+
+@media (max-width: 860px) {
+  .google-panel {
+    margin: 10px;
+  }
+}
+
+
+.google-note {
+  margin: 0;
+  font-size: 12px;
+  color: #4b6b59;
+  background: #eefaf3;
+  border: 1px solid #cfeedd;
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
