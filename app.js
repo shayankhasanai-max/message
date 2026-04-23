@@ -16,8 +16,8 @@ const storage = {
 };
 
 const bus = "BroadcastChannel" in window ? new BroadcastChannel("missile_sync") : null;
+const SESSION_KEY = "missile_session_user";
 const NOTIF_PROMPTED_KEY = "missile_notif_prompted";
-const GOOGLE_CLIENT_ID_KEY = "missile_google_client_id";
 
 const state = {
   mode: "login",
@@ -29,17 +29,17 @@ const state = {
   pendingRemoteCandidates: [],
   call: {
     active: false,
-    muted: false,
-    phase: "idle", // idle | incoming | outgoing | connected
+    phase: "idle",
     targetEmail: null,
+    mediaMode: "audio",
+    muted: false,
     statusText: "Idle",
     startedAt: null,
     seconds: 0,
     timerId: null,
     peer: null,
     localStream: null,
-    pendingOffer: null,
-    mediaMode: "audio"
+    pendingOffer: null
   }
 };
 
@@ -59,35 +59,33 @@ const el = {
   changePinBtn: document.getElementById("changePinBtn"),
   audioCallBtn: document.getElementById("audioCallBtn"),
   videoCallBtn: document.getElementById("videoCallBtn"),
+  mobileBackBtn: document.getElementById("mobileBackBtn"),
   callOverlay: document.getElementById("callOverlay"),
   callTypeLabel: document.getElementById("callTypeLabel"),
   callContactName: document.getElementById("callContactName"),
   callStatus: document.getElementById("callStatus"),
   callTimer: document.getElementById("callTimer"),
+  callVideoWrap: document.getElementById("callVideoWrap"),
+  localVideo: document.getElementById("localVideo"),
+  remoteVideo: document.getElementById("remoteVideo"),
   muteCallBtn: document.getElementById("muteCallBtn"),
   endCallBtn: document.getElementById("endCallBtn"),
   acceptCallBtn: document.getElementById("acceptCallBtn"),
   declineCallBtn: document.getElementById("declineCallBtn"),
-  callVideoWrap: document.getElementById("callVideoWrap"),
-  localVideo: document.getElementById("localVideo"),
-  remoteVideo: document.getElementById("remoteVideo"),
-  remoteAudio: document.getElementById("remoteAudio"),
-  mobileBackBtn: document.getElementById("mobileBackBtn")
+  remoteAudio: document.getElementById("remoteAudio")
 };
 
-const SESSION_KEY = "missile_session_user";
-
 function setSessionUser(email) {
-  const session = { email };
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  storage.set("currentUser", session);
+  const payload = { email };
+  sessionStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+  storage.set("currentUser", payload);
 }
 
 function currentUser() {
-  const session = sessionStorage.getItem(SESSION_KEY);
-  if (session) {
+  const fromSession = sessionStorage.getItem(SESSION_KEY);
+  if (fromSession) {
     try {
-      return JSON.parse(session);
+      return JSON.parse(fromSession);
     } catch {
       sessionStorage.removeItem(SESSION_KEY);
     }
@@ -105,152 +103,67 @@ function allUsers() {
   return storage.get("users", []);
 }
 
-function notificationsSupported() {
-  return "Notification" in window;
+function contactKey(email) {
+  return `contacts_${email}`;
 }
 
-function askNotificationPermissionFirstTime() {
-  if (!notificationsSupported()) return;
-  if (storage.get(NOTIF_PROMPTED_KEY, false)) return;
-  storage.set(NOTIF_PROMPTED_KEY, true);
-
-  if (Notification.permission !== "default") return;
-
-  // Ask once on first use.
-  setTimeout(() => {
-    const allow = confirm("Missile would like to show notifications for new messages and calls. Enable now?");
-    if (allow) {
-      Notification.requestPermission();
-    }
-  }, 500);
+function blockedKey(email) {
+  return `blocked_${email}`;
 }
 
-function showNotification(title, body) {
-  if (!notificationsSupported()) return;
-  if (Notification.permission !== "granted") return;
-  try {
-    new Notification(title, { body });
-  } catch {
-    // Ignore notification errors.
-  }
+function messagesKey(a, b) {
+  const [x, y] = [a, b].sort();
+  return `messages_${x}_${y}`;
 }
 
-function contactKey(userEmail) {
-  return `contacts_${userEmail}`;
+function signalKey(a, b) {
+  const [x, y] = [a, b].sort();
+  return `call_signals_${x}_${y}`;
 }
 
-function messagesKey(userEmail, contactEmail) {
-  const [a, b] = [userEmail, contactEmail].sort();
-  return `messages_${a}_${b}`;
+function getContacts(owner) {
+  return storage.get(contactKey(owner), []);
 }
 
-function signalKey(userEmail, contactEmail) {
-  const [a, b] = [userEmail, contactEmail].sort();
-  return `call_signals_${a}_${b}`;
+function setContacts(owner, contacts) {
+  storage.set(contactKey(owner), contacts);
 }
 
-function getContacts(userEmail) {
-  return storage.get(contactKey(userEmail), []);
+function getBlocked(owner) {
+  return storage.get(blockedKey(owner), []);
 }
 
-function setContacts(userEmail, contacts) {
-  storage.set(contactKey(userEmail), contacts);
+function setBlocked(owner, list) {
+  storage.set(blockedKey(owner), list);
 }
 
-function getMessages(userEmail, contactEmail) {
-  return storage.get(messagesKey(userEmail, contactEmail), []);
+function isBlockedBy(owner, target) {
+  return getBlocked(owner).includes(target);
 }
 
-function setMessages(userEmail, contactEmail, messages) {
-  storage.set(messagesKey(userEmail, contactEmail), messages);
+function getMessages(a, b) {
+  return storage.get(messagesKey(a, b), []);
 }
 
-function getSignals(userEmail, contactEmail) {
-  return storage.get(signalKey(userEmail, contactEmail), []);
+function setMessages(a, b, list) {
+  storage.set(messagesKey(a, b), list);
 }
 
-function setSignals(userEmail, contactEmail, signals) {
-  storage.set(signalKey(userEmail, contactEmail), signals.slice(-400));
+function getSignals(a, b) {
+  return storage.get(signalKey(a, b), []);
+}
+
+function setSignals(a, b, list) {
+  storage.set(signalKey(a, b), list.slice(-500));
 }
 
 function ensureContact(ownerEmail, targetEmail, preferredName = "") {
   if (!ownerEmail || !targetEmail || ownerEmail === targetEmail) return;
   const contacts = getContacts(ownerEmail);
   if (contacts.some((c) => c.email === targetEmail)) return;
-
   const user = allUsers().find((u) => u.email === targetEmail);
-  contacts.push({
-    name: preferredName || user?.name || targetEmail,
-    email: targetEmail
-  });
+  contacts.push({ name: preferredName || user?.name || targetEmail, email: targetEmail });
   setContacts(ownerEmail, contacts);
-}
-
-function syncKnownConversationsAsContacts() {
-  const session = currentUser();
-  if (!session) return;
-
-  const users = allUsers().filter((u) => u.email !== session.email);
-  users.forEach((u) => {
-    if (getMessages(session.email, u.email).length) {
-      ensureContact(session.email, u.email, u.name);
-    }
-  });
-}
-
-function newestMessageTimestamp(userEmail, contactEmail) {
-  const messages = getMessages(userEmail, contactEmail);
-  if (!messages.length) return "";
-  return messages[messages.length - 1].timestamp || "";
-}
-
-function initNotificationBaseline() {
-  const session = currentUser();
-  if (!session) return;
-
-  const users = allUsers().filter((u) => u.email !== session.email);
-  for (const u of users) {
-    const key = messagesKey(session.email, u.email);
-    state.notifiedMessages[key] = newestMessageTimestamp(session.email, u.email);
-  }
-}
-
-function checkIncomingMessageNotifications() {
-  const session = currentUser();
-  if (!session) return;
-
-  const users = allUsers().filter((u) => u.email !== session.email);
-  for (const u of users) {
-    const key = messagesKey(session.email, u.email);
-    const messages = getMessages(session.email, u.email);
-    if (!messages.length) continue;
-
-    const latest = messages[messages.length - 1];
-    const previousTs = state.notifiedMessages[key] || "";
-
-    if (latest.timestamp !== previousTs) {
-      state.notifiedMessages[key] = latest.timestamp;
-      const isIncoming = latest.sender !== session.email;
-      if (isIncoming && document.visibilityState !== "visible") {
-        showNotification(getDisplayNameForEmail(session.email, u.email), latest.text || "[Media]");
-      }
-    }
-  }
-}
-
-function getDisplayNameForEmail(ownerEmail, targetEmail) {
-  const contacts = getContacts(ownerEmail);
-  const inContacts = contacts.find((c) => c.email === targetEmail);
-  if (inContacts?.name) return inContacts.name;
-
-  const user = allUsers().find((u) => u.email === targetEmail);
-  return user?.name || targetEmail;
-}
-
-function getActiveContact() {
-  const session = currentUser();
-  if (!session) return null;
-  return getContacts(session.email).find((c) => c.email === state.activeContactEmail) || null;
 }
 
 function isMobileView() {
@@ -265,11 +178,117 @@ function updateMobileLayout() {
   el.mobileBackBtn.classList.toggle("hidden", !chatOpen);
 }
 
-function openChat(contactEmail) {
-  state.activeContactEmail = contactEmail;
-  if (isMobileView()) {
-    state.mobileChatOpen = true;
+function getDisplayName(owner, target) {
+  const contacts = getContacts(owner);
+  const contact = contacts.find((c) => c.email === target);
+  if (contact?.name) return contact.name;
+  const user = allUsers().find((u) => u.email === target);
+  return user?.name || target;
+}
+
+function notificationsSupported() {
+  return "Notification" in window;
+}
+
+function askNotificationPermissionFirstTime() {
+  if (!notificationsSupported()) return;
+  if (storage.get(NOTIF_PROMPTED_KEY, false)) return;
+  storage.set(NOTIF_PROMPTED_KEY, true);
+  if (Notification.permission !== "default") return;
+  setTimeout(() => {
+    const ok = confirm("Missile wants notifications for messages and calls. Enable?");
+    if (ok) Notification.requestPermission();
+  }, 350);
+}
+
+function showNotification(title, body) {
+  if (!notificationsSupported() || Notification.permission !== "granted") return;
+  try {
+    new Notification(title, { body });
+  } catch {
+    // no-op
   }
+}
+
+function notifySync(type, payload = {}) {
+  const detail = { type, payload, at: Date.now(), id: `${Date.now()}_${Math.random()}` };
+  if (bus) bus.postMessage(detail);
+  localStorage.setItem("missile_sync_event", JSON.stringify(detail));
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function newestMessageTimestamp(selfEmail, otherEmail) {
+  const list = getMessages(selfEmail, otherEmail);
+  if (!list.length) return "";
+  return list[list.length - 1].timestamp || "";
+}
+
+function initNotificationBaseline() {
+  const session = currentUser();
+  if (!session) return;
+  allUsers().forEach((u) => {
+    if (u.email === session.email) return;
+    state.notifiedMessages[messagesKey(session.email, u.email)] = newestMessageTimestamp(session.email, u.email);
+  });
+}
+
+function checkIncomingMessageNotifications() {
+  const session = currentUser();
+  if (!session) return;
+
+  allUsers().forEach((u) => {
+    if (u.email === session.email) return;
+    if (isBlockedBy(session.email, u.email)) return;
+
+    const key = messagesKey(session.email, u.email);
+    const list = getMessages(session.email, u.email);
+    if (!list.length) return;
+    const latest = list[list.length - 1];
+    const previous = state.notifiedMessages[key] || "";
+    if (latest.timestamp !== previous) {
+      state.notifiedMessages[key] = latest.timestamp;
+      if (latest.sender !== session.email && document.visibilityState !== "visible") {
+        showNotification(getDisplayName(session.email, u.email), latest.text || "[Media]");
+      }
+    }
+  });
+}
+
+function getKnownPeople(selfEmail) {
+  const map = new Map();
+  getContacts(selfEmail).forEach((c) => map.set(c.email, { ...c, isContact: true }));
+
+  allUsers().forEach((u) => {
+    if (u.email === selfEmail) return;
+    if (getMessages(selfEmail, u.email).length > 0 && !map.has(u.email)) {
+      map.set(u.email, {
+        email: u.email,
+        name: u.name || u.email,
+        isContact: false
+      });
+    }
+  });
+
+  return Array.from(map.values());
+}
+
+function getActiveContact() {
+  const session = currentUser();
+  if (!session) return null;
+  return getKnownPeople(session.email).find((p) => p.email === state.activeContactEmail) || null;
+}
+
+function openChat(email) {
+  state.activeContactEmail = email;
+  if (isMobileView()) state.mobileChatOpen = true;
   renderContacts();
   renderMessages();
   updateMobileLayout();
@@ -280,28 +299,7 @@ function goBackToContacts() {
   state.mobileChatOpen = false;
   updateMobileLayout();
 }
-function notifySync(type, payload = {}) {
-  const detail = { type, payload, at: Date.now(), id: `${Date.now()}_${Math.random()}` };
-  if (bus) bus.postMessage(detail);
-  localStorage.setItem("missile_sync_event", JSON.stringify(detail));
-}
 
-function decodeJwtPayload(token) {
-  try {
-    const payload = token.split(".")[1];
-    if (!payload) return null;
-    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const json = decodeURIComponent(
-      atob(base64)
-        .split("")
-        .map((c) => `%${(`00${c.charCodeAt(0).toString(16)}`).slice(-2)}`)
-        .join("")
-    );
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
 function renderAuth() {
   el.authScreen.classList.remove("hidden");
   el.lockScreen.classList.add("hidden");
@@ -310,7 +308,7 @@ function renderAuth() {
   const isSignup = state.mode === "signup";
   el.authScreen.innerHTML = `
     <div class="card auth-card">
-      <h2>${isSignup ? "Create account" : "Good to see you again!"}</h2>
+      <h2>${isSignup ? "Create account" : "Welcome back"}</h2>
       <p class="meta">${isSignup ? "Sign up to start messaging" : "Log in to continue"}</p>
       <form id="authForm" class="stack">
         ${
@@ -322,26 +320,29 @@ function renderAuth() {
         <input id="authEmail" type="email" placeholder="Email" required />
         <input id="authPassword" type="password" placeholder="Password" required />
         <button class="btn" type="submit">${isSignup ? "Sign up" : "Login"}</button>
-        <button id="googleAuthBtn" class="google-btn-fallback" type="button"><span>G</span> Continue with Google</button>
       </form>
+
       <section id="googlePanel" class="google-panel hidden">
         <p class="meta">Quick Google setup</p>
-        <p class="google-note">No password needed for Google sign up.</p>
+        <p class="google-note">No password needed for Google sign in.</p>
         <input id="googleEmailInput" type="email" placeholder="Google email" />
-        <input id="googleNameInput" type="text" placeholder="Full name" />
-        <input id="googlePinInput" type="password" maxlength="4" placeholder="4-digit PIN (For your privacy in our app)" />
+        <input id="googleNameInput" type="text" placeholder="Full name (new account only)" />
+        <input id="googlePinInput" type="password" maxlength="4" placeholder="4-digit PIN (new account only)" />
         <div class="google-panel-actions">
           <button id="googleSubmitBtn" class="btn" type="button">Continue</button>
           <button id="googleCancelBtn" class="btn btn-ghost" type="button">Cancel</button>
         </div>
         <p id="googleError" class="error"></p>
       </section>
+
+      <div class="google-row">
+        <button id="googleAuthBtn" class="google-btn-fallback" type="button"><span>G</span> Continue with Google</button>
+      </div>
+
       <p id="authError" class="error"></p>
       <p class="meta">
         ${isSignup ? "Already have an account?" : "New to Missile?"}
-        <button id="toggleAuth" type="button" class="auth-toggle">
-          ${isSignup ? "Login" : "Sign up"}
-        </button>
+        <button id="toggleAuth" type="button" class="auth-toggle">${isSignup ? "Login" : "Sign up"}</button>
       </p>
     </div>
   `;
@@ -351,7 +352,6 @@ function renderAuth() {
     renderAuth();
   };
 
-  const googleBtn = document.getElementById("googleAuthBtn");
   const googlePanel = document.getElementById("googlePanel");
   const googleEmailInput = document.getElementById("googleEmailInput");
   const googleNameInput = document.getElementById("googleNameInput");
@@ -360,27 +360,19 @@ function renderAuth() {
   const googleCancelBtn = document.getElementById("googleCancelBtn");
   const googleError = document.getElementById("googleError");
 
-  function openGooglePanel() {
-    googleError.textContent = "";
+  document.getElementById("googleAuthBtn").onclick = () => {
     googlePanel.classList.remove("hidden");
-    const existingEmail = document.getElementById("authEmail")?.value?.trim();
-    if (existingEmail && !googleEmailInput.value) {
-      googleEmailInput.value = existingEmail;
-    }
+    googleError.textContent = "";
     googleEmailInput.focus();
-  }
+  };
 
-  function closeGooglePanel() {
+  googleCancelBtn.onclick = () => {
     googlePanel.classList.add("hidden");
     googleError.textContent = "";
-  }
-
-  googleBtn.onclick = openGooglePanel;
-  googleCancelBtn.onclick = closeGooglePanel;
+  };
 
   googleSubmitBtn.onclick = () => {
     googleError.textContent = "";
-
     const email = googleEmailInput.value.trim().toLowerCase();
     const name = googleNameInput.value.trim();
     const pin = googlePinInput.value.trim();
@@ -406,25 +398,18 @@ function renderAuth() {
         return;
       }
 
-      user = {
-        name,
-        email,
-        password: "google-auth",
-        pin,
-        provider: "google"
-      };
-
+      user = { name, email, password: "google-auth", pin, provider: "google" };
       users.push(user);
       storage.set("users", users);
-      if (!storage.get(contactKey(email), null)) {
-        setContacts(email, []);
-      }
+      setContacts(email, []);
+      setBlocked(email, []);
       notifySync("auth");
     }
 
     setSessionUser(email);
     renderLock();
   };
+
   document.getElementById("authForm").onsubmit = (event) => {
     event.preventDefault();
     const authError = document.getElementById("authError");
@@ -450,10 +435,11 @@ function renderAuth() {
 
       users.push({ name, email, password, pin });
       storage.set("users", users);
-      setSessionUser(email);
       setContacts(email, []);
-      renderLock();
+      setBlocked(email, []);
+      setSessionUser(email);
       notifySync("auth");
+      renderLock();
       return;
     }
 
@@ -470,18 +456,13 @@ function renderAuth() {
 
 function renderLock() {
   const session = currentUser();
-  if (!session) {
-    renderAuth();
-    return;
-  }
+  if (!session) return renderAuth();
+
   askNotificationPermissionFirstTime();
   initNotificationBaseline();
 
   const user = allUsers().find((u) => u.email === session.email);
-  if (!user) {
-    logout();
-    return;
-  }
+  if (!user) return logout();
 
   el.authScreen.classList.add("hidden");
   el.lockScreen.classList.remove("hidden");
@@ -502,114 +483,187 @@ function renderLock() {
   document.getElementById("unlockForm").onsubmit = (event) => {
     event.preventDefault();
     const pin = document.getElementById("unlockPin").value.trim();
-    const lockError = document.getElementById("lockError");
-
+    const err = document.getElementById("lockError");
     if (pin !== user.pin) {
-      lockError.textContent = "Incorrect PIN.";
+      err.textContent = "Incorrect PIN.";
       return;
     }
-
     renderChatApp();
   };
+}
+
+function ensureHeaderUtilityButtons() {
+  const headerActions = document.querySelector(".header-actions");
+  if (!headerActions) return;
+
+  if (!document.getElementById("addKnownBtn")) {
+    const addBtn = document.createElement("button");
+    addBtn.id = "addKnownBtn";
+    addBtn.type = "button";
+    addBtn.className = "btn btn-ghost hidden";
+    addBtn.textContent = "Add Contact";
+    headerActions.appendChild(addBtn);
+    addBtn.addEventListener("click", addActiveToContacts);
+  }
+
+  if (!document.getElementById("blockBtn")) {
+    const blockBtn = document.createElement("button");
+    blockBtn.id = "blockBtn";
+    blockBtn.type = "button";
+    blockBtn.className = "btn btn-ghost hidden";
+    blockBtn.textContent = "Block";
+    headerActions.appendChild(blockBtn);
+    blockBtn.addEventListener("click", toggleBlockActiveContact);
+  }
 }
 
 function renderContacts() {
   const session = currentUser();
   if (!session) return;
-  const contacts = getContacts(session.email);
 
-  if (!contacts.length) {
-    el.contactsList.innerHTML = '<p class="empty">No contacts yet.</p>';
+  const people = getKnownPeople(session.email)
+    .filter((p) => !isBlockedBy(session.email, p.email))
+    .sort((a, b) => {
+      const ta = newestMessageTimestamp(session.email, a.email);
+      const tb = newestMessageTimestamp(session.email, b.email);
+      return tb.localeCompare(ta);
+    });
+
+  if (!people.length) {
+    el.contactsList.innerHTML = '<p class="empty">No chats yet.</p>';
     return;
   }
 
-  el.contactsList.innerHTML = contacts
-    .map((contact) => {
-      const last = getMessages(session.email, contact.email).slice(-1)[0];
-      const preview = last ? (last.text || "[Media]") : "Tap to start chatting";
-      return `
-      <article class="contact-item ${state.activeContactEmail === contact.email ? "active" : ""}" data-email="${contact.email}">
+  el.contactsList.innerHTML = people.map((person) => {
+    const last = getMessages(session.email, person.email).slice(-1)[0];
+    const preview = last ? (last.text || "[Media]") : (person.isContact ? "Tap to start chatting" : "New chat");
+    return `
+      <article class="contact-item ${state.activeContactEmail === person.email ? "active" : ""}" data-email="${person.email}">
         <div class="contact-top">
-          <h3>${escapeHtml(contact.name)}</h3>
+          <h3>${escapeHtml(person.name)}</h3>
           <span class="meta">${last ? new Date(last.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>
         </div>
         <div class="meta contact-sub">${escapeHtml(preview)}</div>
       </article>
     `;
-    })
-    .join("");
+  }).join("");
 
   el.contactsList.querySelectorAll(".contact-item").forEach((item) => {
-    item.addEventListener("click", () => {
-      openChat(item.dataset.email);
-    });
+    item.addEventListener("click", () => openChat(item.dataset.email));
   });
+}
+
+function addActiveToContacts() {
+  const session = currentUser();
+  const active = getActiveContact();
+  if (!session || !active) return;
+
+  if (getContacts(session.email).some((c) => c.email === active.email)) return;
+  ensureContact(session.email, active.email, active.name);
+  renderContacts();
+  renderMessages();
+  notifySync("contacts", { owner: session.email });
+}
+
+function toggleBlockActiveContact() {
+  const session = currentUser();
+  const active = getActiveContact();
+  if (!session || !active) return;
+
+  const list = getBlocked(session.email);
+  const idx = list.indexOf(active.email);
+  if (idx >= 0) {
+    list.splice(idx, 1);
+  } else {
+    list.push(active.email);
+    if (state.call.active && state.call.targetEmail === active.email) {
+      endCall(true);
+    }
+  }
+
+  setBlocked(session.email, list);
+  renderContacts();
+  renderMessages();
+  notifySync("block", { owner: session.email, target: active.email });
 }
 
 function renderMessages() {
   const session = currentUser();
   if (!session) return;
 
-  const activeContact = getActiveContact();
+  const active = getActiveContact();
+  const addBtn = document.getElementById("addKnownBtn");
+  const blockBtn = document.getElementById("blockBtn");
 
-  if (!activeContact) {
+  if (!active) {
     state.mobileChatOpen = false;
-    el.activeChatTitle.textContent = "Select a contact";
+    el.activeChatTitle.textContent = "Select a chat";
     el.activeChatSubtitle.textContent = "No chat selected";
-    el.messages.innerHTML = '<p class="empty">Choose a contact to start chatting.</p>';
+    el.messages.innerHTML = '<p class="empty">Choose a contact or wait for new messages.</p>';
+    if (addBtn) addBtn.classList.add("hidden");
+    if (blockBtn) blockBtn.classList.add("hidden");
+    el.messageInput.disabled = true;
     return;
   }
 
-  el.activeChatTitle.textContent = getDisplayNameForEmail(session.email, activeContact.email);
-  el.activeChatSubtitle.textContent = activeContact.email;
+  const inContacts = getContacts(session.email).some((c) => c.email === active.email);
+  const blocked = isBlockedBy(session.email, active.email);
 
-  const messages = getMessages(session.email, activeContact.email);
+  if (addBtn) {
+    addBtn.classList.toggle("hidden", inContacts);
+  }
+  if (blockBtn) {
+    blockBtn.classList.remove("hidden");
+    blockBtn.textContent = blocked ? "Unblock" : "Block";
+  }
 
-  if (!messages.length) {
+  el.activeChatTitle.textContent = getDisplayName(session.email, active.email);
+  el.activeChatSubtitle.textContent = active.email;
+
+  const list = getMessages(session.email, active.email);
+  if (!list.length) {
     el.messages.innerHTML = '<p class="empty">No messages yet.</p>';
-    return;
-  }
-
-  el.messages.innerHTML = messages
-    .map((message) => {
-      const bubbleClass = message.sender === session.email ? "sent" : "received";
-      const mediaPart =
-        message.type === "media" && message.media
-          ? `<div class="media-chip">${escapeHtml(message.media.name)} (${escapeHtml(message.media.mime || "file")})</div>`
-          : "";
-
+  } else {
+    el.messages.innerHTML = list.map((m) => {
+      const bubble = m.sender === session.email ? "sent" : "received";
+      const media = m.type === "media" && m.media
+        ? `<div class="media-chip">${escapeHtml(m.media.name)} (${escapeHtml(m.media.mime || "file")})</div>`
+        : "";
       return `
-        <div class="message ${bubbleClass}">
-          <div>${escapeHtml(message.text || "[Media]")}</div>
-          ${mediaPart}
-          <div class="time">${new Date(message.timestamp).toLocaleString()}</div>
+        <div class="message ${bubble}">
+          <div>${escapeHtml(m.text || "[Media]")}</div>
+          ${media}
+          <div class="time">${new Date(m.timestamp).toLocaleString()}</div>
         </div>
       `;
-    })
-    .join("");
+    }).join("");
+  }
 
+  if (blocked) {
+    el.messages.insertAdjacentHTML("beforeend", '<p class="empty">You blocked this user. Unblock to send/receive.</p>');
+  }
+
+  el.messageInput.disabled = blocked;
   el.messages.scrollTop = el.messages.scrollHeight;
 }
 
 function renderChatApp() {
   const session = currentUser();
-  if (!session) {
-    renderAuth();
-    return;
-  }
+  if (!session) return renderAuth();
 
   el.authScreen.classList.add("hidden");
   el.lockScreen.classList.add("hidden");
   el.chatScreen.classList.remove("hidden");
 
-  const contacts = getContacts(session.email);
-  if (!state.activeContactEmail && contacts.length && !isMobileView()) {
-    state.activeContactEmail = contacts[0].email;
+  ensureHeaderUtilityButtons();
+
+  const people = getKnownPeople(session.email).filter((p) => !isBlockedBy(session.email, p.email));
+  if (!state.activeContactEmail && people.length && !isMobileView()) {
+    state.activeContactEmail = people[0].email;
   }
 
   state.mobileChatOpen = isMobileView() ? false : !!state.activeContactEmail;
 
-  syncKnownConversationsAsContacts();
   renderContacts();
   renderMessages();
   updateMobileLayout();
@@ -624,41 +678,35 @@ function addContact(event) {
 
   const nameInput = document.getElementById("contactName");
   const emailInput = document.getElementById("contactEmail");
-
   const name = nameInput.value.trim();
   const email = emailInput.value.trim().toLowerCase();
 
   if (!name || !email) return;
   if (email === session.email) {
-    alert("You cannot add yourself as a contact.");
+    alert("You cannot add yourself.");
     return;
   }
-
-  const contacts = getContacts(session.email);
-  if (contacts.some((c) => c.email === email)) {
+  if (getContacts(session.email).some((c) => c.email === email)) {
     alert("Contact already exists.");
     return;
   }
 
+  const contacts = getContacts(session.email);
   contacts.push({ name, email });
   setContacts(session.email, contacts);
-
-  if (!state.activeContactEmail) {
-    state.activeContactEmail = email;
-  }
 
   nameInput.value = "";
   emailInput.value = "";
 
+  if (!state.activeContactEmail) state.activeContactEmail = email;
   renderContacts();
   renderMessages();
   notifySync("contacts", { owner: session.email });
 }
 
 function setMediaPreview(file) {
-  const oldPreview = document.getElementById("pendingMediaPreview");
-  if (oldPreview) oldPreview.remove();
-
+  const old = document.getElementById("pendingMediaPreview");
+  if (old) old.remove();
   if (!file) return;
 
   const wrapper = document.createElement("div");
@@ -680,31 +728,36 @@ function setMediaPreview(file) {
 function sendMessage(event) {
   event.preventDefault();
   const session = currentUser();
-  if (!session || !state.activeContactEmail) return;
+  const active = getActiveContact();
+  if (!session || !active) return;
+
+  if (isBlockedBy(session.email, active.email)) {
+    alert("Unblock this user to send messages.");
+    return;
+  }
+  if (isBlockedBy(active.email, session.email)) {
+    alert("This user blocked you. Message not delivered.");
+    return;
+  }
 
   const text = el.messageInput.value.trim();
   const hasMedia = !!state.pendingMedia;
   if (!text && !hasMedia) return;
 
-  const contactEmail = state.activeContactEmail;
-  const messages = getMessages(session.email, contactEmail);
-
-  messages.push({
+  const list = getMessages(session.email, active.email);
+  list.push({
     text: text || "[Media]",
     type: hasMedia ? "media" : "text",
     sender: session.email,
     timestamp: new Date().toISOString(),
-    media: hasMedia
-      ? {
-          name: state.pendingMedia.name,
-          mime: state.pendingMedia.type || "unknown",
-          size: state.pendingMedia.size
-        }
-      : null
+    media: hasMedia ? {
+      name: state.pendingMedia.name,
+      mime: state.pendingMedia.type || "unknown",
+      size: state.pendingMedia.size
+    } : null
   });
 
-  setMessages(session.email, contactEmail, messages);
-  ensureContact(contactEmail, session.email, allUsers().find((u) => u.email === session.email)?.name || session.email);
+  setMessages(session.email, active.email, list);
 
   el.messageInput.value = "";
   el.mediaInput.value = "";
@@ -712,21 +765,20 @@ function sendMessage(event) {
   setMediaPreview(null);
 
   renderMessages();
-  notifySync("message", { conversation: messagesKey(session.email, contactEmail) });
+  renderContacts();
+  notifySync("message", { conversation: messagesKey(session.email, active.email) });
 }
 
 function changePin() {
   const session = currentUser();
   if (!session) return;
+  const users = allUsers();
+  const idx = users.findIndex((u) => u.email === session.email);
+  if (idx < 0) return;
 
   const current = prompt("Enter current PIN:");
   if (!current) return;
-
-  const users = allUsers();
-  const index = users.findIndex((u) => u.email === session.email);
-  if (index === -1) return;
-
-  if (users[index].pin !== current.trim()) {
+  if (users[idx].pin !== current.trim()) {
     alert("Current PIN is incorrect.");
     return;
   }
@@ -737,35 +789,15 @@ function changePin() {
     return;
   }
 
-  users[index].pin = next.trim();
+  users[idx].pin = next.trim();
   storage.set("users", users);
-  alert("PIN updated successfully.");
+  alert("PIN updated.");
 }
 
-function logout() {
-  endCall(false);
-  sessionStorage.removeItem(SESSION_KEY);
-  storage.remove("currentUser");
-  state.activeContactEmail = null;
-  state.pendingMedia = null;
-  renderAuth();
-  updateMobileLayout();
-  renderCallOverlay();
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function formatDuration(totalSeconds) {
-  const mins = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
-  const secs = String(totalSeconds % 60).padStart(2, "0");
-  return `${mins}:${secs}`;
+function formatDuration(sec) {
+  const m = String(Math.floor(sec / 60)).padStart(2, "0");
+  const s = String(sec % 60).padStart(2, "0");
+  return `${m}:${s}`;
 }
 
 function clearCallTimer() {
@@ -787,71 +819,68 @@ function closePeer() {
   }
 
   state.call.localStream = null;
-  el.remoteAudio.srcObject = null;
-  el.remoteVideo.srcObject = null;
-  el.localVideo.srcObject = null;
   state.pendingRemoteCandidates = [];
+
+  el.remoteAudio.srcObject = null;
+  if (el.remoteVideo) el.remoteVideo.srcObject = null;
+  if (el.localVideo) el.localVideo.srcObject = null;
 }
 
 function resetCallState() {
   clearCallTimer();
   closePeer();
-
   state.call.active = false;
-  state.call.muted = false;
   state.call.phase = "idle";
   state.call.targetEmail = null;
+  state.call.mediaMode = "audio";
+  state.call.muted = false;
   state.call.statusText = "Idle";
   state.call.startedAt = null;
   state.call.seconds = 0;
   state.call.pendingOffer = null;
-  state.call.mediaMode = "audio";
 }
 
 function renderCallOverlay() {
   const session = currentUser();
-  const activeContact = getActiveContact();
+  const active = getActiveContact();
+  const canStart = !!session && !!active && !state.call.active && !isBlockedBy(session?.email || "", active?.email || "");
 
-  const canStartCall = !!session && !!activeContact && !state.call.active;
-  el.audioCallBtn.disabled = !canStartCall;
-  if (el.videoCallBtn) el.videoCallBtn.disabled = !canStartCall;
+  el.audioCallBtn.disabled = !canStart;
+  if (el.videoCallBtn) el.videoCallBtn.disabled = !canStart;
 
   if (!state.call.active) {
     el.callOverlay.classList.add("hidden");
     return;
   }
 
-  const targetEmail = state.call.targetEmail || activeContact?.email;
-  const displayName = targetEmail && session ? getDisplayNameForEmail(session.email, targetEmail) : "Unknown";
-
   el.callOverlay.classList.remove("hidden");
-  if (el.callTypeLabel) {
-    el.callTypeLabel.textContent = state.call.mediaMode === "video" ? "Missile Video Call" : "Missile Audio Call";
-  }
-  el.callContactName.textContent = displayName;
+  el.callTypeLabel.textContent = state.call.mediaMode === "video" ? "Missile Video Call" : "Missile Audio Call";
+  const contactEmail = state.call.targetEmail || active?.email;
+  el.callContactName.textContent = contactEmail && session ? getDisplayName(session.email, contactEmail) : "Unknown";
   el.callStatus.textContent = state.call.statusText;
   el.callTimer.textContent = formatDuration(state.call.seconds);
   el.muteCallBtn.textContent = state.call.muted ? "Unmute" : "Mute";
 
   const incoming = state.call.phase === "incoming";
+  const connected = state.call.phase === "connected";
+
   el.acceptCallBtn.classList.toggle("hidden", !incoming);
   el.declineCallBtn.classList.toggle("hidden", !incoming);
-
-  const connected = state.call.phase === "connected";
   el.muteCallBtn.classList.toggle("hidden", incoming);
   el.endCallBtn.classList.toggle("hidden", incoming);
   el.muteCallBtn.disabled = !connected;
 
-  const showVideo = state.call.mediaMode === "video";
-  if (el.callVideoWrap) el.callVideoWrap.classList.toggle("hidden", !showVideo);
+  if (el.callVideoWrap) {
+    el.callVideoWrap.classList.toggle("hidden", state.call.mediaMode !== "video");
+  }
 }
 
 function publishSignal(targetEmail, type, payload = {}) {
   const session = currentUser();
   if (!session) return;
 
-  const signals = getSignals(session.email, targetEmail);
-  signals.push({
+  const list = getSignals(session.email, targetEmail);
+  list.push({
     id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`,
     from: session.email,
     to: targetEmail,
@@ -859,7 +888,7 @@ function publishSignal(targetEmail, type, payload = {}) {
     payload,
     timestamp: Date.now()
   });
-  setSignals(session.email, targetEmail, signals);
+  setSignals(session.email, targetEmail, list);
   notifySync("signal", { pair: signalKey(session.email, targetEmail) });
 }
 
@@ -871,25 +900,21 @@ function ensurePeer(targetEmail) {
   });
 
   peer.onicecandidate = (event) => {
-    if (event.candidate) {
-      publishSignal(targetEmail, "candidate", event.candidate);
-    }
+    if (event.candidate) publishSignal(targetEmail, "candidate", event.candidate);
   };
 
   peer.ontrack = (event) => {
     const [stream] = event.streams;
-    if (stream) {
-      el.remoteAudio.srcObject = stream;
-      if (state.call.mediaMode === "video" && el.remoteVideo) {
-        el.remoteVideo.srcObject = stream;
-      }
+    if (!stream) return;
+    el.remoteAudio.srcObject = stream;
+    if (state.call.mediaMode === "video" && el.remoteVideo) {
+      el.remoteVideo.srcObject = stream;
     }
   };
 
   peer.onconnectionstatechange = () => {
     if (["disconnected", "failed", "closed"].includes(peer.connectionState)) {
       endCall(false);
-      renderCallOverlay();
     }
   };
 
@@ -930,26 +955,31 @@ function startCallTimer() {
 
 async function startCall(mode) {
   const session = currentUser();
-  const activeContact = getActiveContact();
-  if (!session || !activeContact || state.call.active) return;
+  const active = getActiveContact();
+  if (!session || !active || state.call.active) return;
+
+  if (isBlockedBy(session.email, active.email) || isBlockedBy(active.email, session.email)) {
+    alert("Call not allowed. One side has blocked the other.");
+    return;
+  }
 
   try {
     state.call.active = true;
     state.call.phase = "outgoing";
-    state.call.targetEmail = activeContact.email;
+    state.call.targetEmail = active.email;
     state.call.mediaMode = mode;
     state.call.statusText = mode === "video" ? "Starting video call..." : "Calling...";
     renderCallOverlay();
 
     const stream = await ensureLocalMedia(mode);
-    const peer = ensurePeer(activeContact.email);
+    const peer = ensurePeer(active.email);
     stream.getTracks().forEach((track) => peer.addTrack(track, stream));
 
     const offer = await peer.createOffer();
     await peer.setLocalDescription(offer);
-    publishSignal(activeContact.email, "offer", { sdp: offer, mode });
+    publishSignal(active.email, "offer", { sdp: offer, mode });
   } catch {
-    alert(mode === "video" ? "Unable to start video call." : "Unable to start call.");
+    alert("Unable to start call. Check mic/camera permission.");
     resetCallState();
     renderCallOverlay();
   }
@@ -967,21 +997,19 @@ async function acceptIncomingCall() {
   if (state.call.phase !== "incoming" || !state.call.pendingOffer || !state.call.targetEmail) return;
 
   try {
-    const targetEmail = state.call.targetEmail;
     const stream = await ensureLocalMedia(state.call.mediaMode || "audio");
-    const peer = ensurePeer(targetEmail);
+    const peer = ensurePeer(state.call.targetEmail);
     stream.getTracks().forEach((track) => peer.addTrack(track, stream));
 
     await peer.setRemoteDescription(new RTCSessionDescription(state.call.pendingOffer));
-
-    for (const c of state.pendingRemoteCandidates) {
-      await peer.addIceCandidate(new RTCIceCandidate(c));
+    for (const cand of state.pendingRemoteCandidates) {
+      await peer.addIceCandidate(new RTCIceCandidate(cand));
     }
     state.pendingRemoteCandidates = [];
 
     const answer = await peer.createAnswer();
     await peer.setLocalDescription(answer);
-    publishSignal(targetEmail, "answer", { sdp: answer });
+    publishSignal(state.call.targetEmail, "answer", { sdp: answer });
 
     state.call.phase = "connected";
     state.call.statusText = "Connected";
@@ -1011,12 +1039,9 @@ function toggleMuteCall() {
 
 function endCall(sendSignal = true) {
   if (!state.call.active) return;
-
-  const targetEmail = state.call.targetEmail;
-  if (sendSignal && targetEmail) {
-    publishSignal(targetEmail, "end", { duration: state.call.seconds });
+  if (sendSignal && state.call.targetEmail) {
+    publishSignal(state.call.targetEmail, "end", { duration: state.call.seconds });
   }
-
   resetCallState();
   renderCallOverlay();
 }
@@ -1034,35 +1059,37 @@ async function handleSignal(signal) {
       return;
     }
 
+    if (isBlockedBy(session.email, signal.from) || isBlockedBy(signal.from, session.email)) {
+      publishSignal(signal.from, "reject", { reason: "blocked" });
+      return;
+    }
+
     const offerPayload = signal.payload || {};
     state.call.active = true;
     state.call.phase = "incoming";
     state.call.targetEmail = signal.from;
     state.call.mediaMode = offerPayload.mode === "video" ? "video" : "audio";
     state.call.pendingOffer = offerPayload.sdp || offerPayload;
-    state.call.statusText = `Incoming ${state.call.mediaMode} call from ${getDisplayNameForEmail(session.email, signal.from)}`;
+    state.call.statusText = `Incoming ${state.call.mediaMode} call from ${getDisplayName(session.email, signal.from)}`;
+
     if (document.visibilityState !== "visible") {
-      showNotification(`Incoming ${state.call.mediaMode} call`, `From ${getDisplayNameForEmail(session.email, signal.from)}`);
+      showNotification(`Incoming ${state.call.mediaMode} call`, `From ${getDisplayName(session.email, signal.from)}`);
     }
 
-    if (getContacts(session.email).some((c) => c.email === signal.from)) {
-      state.activeContactEmail = signal.from;
-      renderContacts();
-      renderMessages();
-    }
-
+    if (!state.activeContactEmail) state.activeContactEmail = signal.from;
+    renderContacts();
+    renderMessages();
     renderCallOverlay();
     return;
   }
 
   if (!state.call.active || state.call.targetEmail !== signal.from) return;
-
   const peer = state.call.peer;
 
   if (signal.type === "answer" && peer) {
     await peer.setRemoteDescription(new RTCSessionDescription(signal.payload?.sdp || signal.payload));
-    for (const c of state.pendingRemoteCandidates) {
-      await peer.addIceCandidate(new RTCIceCandidate(c));
+    for (const cand of state.pendingRemoteCandidates) {
+      await peer.addIceCandidate(new RTCIceCandidate(cand));
     }
     state.pendingRemoteCandidates = [];
     state.call.phase = "connected";
@@ -1082,7 +1109,7 @@ async function handleSignal(signal) {
   }
 
   if (signal.type === "reject") {
-    alert("Call declined or contact is busy.");
+    alert("Call declined or unavailable.");
     resetCallState();
     renderCallOverlay();
     return;
@@ -1098,24 +1125,29 @@ async function processSignals() {
   const session = currentUser();
   if (!session) return;
 
-  const contacts = getContacts(session.email);
-  const knownEmails = new Set(contacts.map((c) => c.email));
-  allUsers().forEach((u) => {
-    if (u.email !== session.email) knownEmails.add(u.email);
-  });
-
-  for (const email of knownEmails) {
-    const signals = getSignals(session.email, email);
-    for (const signal of signals) {
+  for (const user of allUsers()) {
+    if (user.email === session.email) continue;
+    const list = getSignals(session.email, user.email);
+    for (const signal of list) {
       await handleSignal(signal);
     }
   }
 }
 
+function logout() {
+  endCall(false);
+  sessionStorage.removeItem(SESSION_KEY);
+  storage.remove("currentUser");
+  state.activeContactEmail = null;
+  state.pendingMedia = null;
+  renderAuth();
+  updateMobileLayout();
+  renderCallOverlay();
+}
+
 function onExternalSync() {
   if (!currentUser()) return;
   checkIncomingMessageNotifications();
-  syncKnownConversationsAsContacts();
   renderContacts();
   renderMessages();
   updateMobileLayout();
@@ -1142,15 +1174,18 @@ function boot() {
     setMediaPreview(file);
   });
 
-  if (bus) {
-    bus.onmessage = () => onExternalSync();
-  }
+  if (bus) bus.onmessage = () => onExternalSync();
 
   window.addEventListener("resize", updateMobileLayout);
-
   window.addEventListener("storage", (event) => {
     if (!event.key) return;
-    if (event.key.startsWith("messages_") || event.key.startsWith("contacts_") || event.key.startsWith("call_signals_") || event.key === "missile_sync_event") {
+    if (
+      event.key.startsWith("messages_") ||
+      event.key.startsWith("contacts_") ||
+      event.key.startsWith("blocked_") ||
+      event.key.startsWith("call_signals_") ||
+      event.key === "missile_sync_event"
+    ) {
       onExternalSync();
     }
   });
@@ -1163,29 +1198,8 @@ function boot() {
     renderAuth();
   }
 
-  syncKnownConversationsAsContacts();
   updateMobileLayout();
   renderCallOverlay();
 }
 
 boot();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
